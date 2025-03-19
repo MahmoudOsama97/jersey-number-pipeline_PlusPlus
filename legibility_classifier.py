@@ -21,9 +21,29 @@ import numpy as np
 
 from sam.sam import SAM
 
-def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
-    since = time.time()
+def mixup_data(x, y, alpha=0.4):
+    """
+    Returns mixed inputs, pairs of targets, and lambda for MixUp.
+    """
+    if alpha > 0:
+        lam = np.random.beta(alpha, alpha)
+    else:
+        lam = 1.0
+    batch_size = x.size()[0]
+    index = torch.randperm(batch_size).to(x.device)
+    
+    mixed_x = lam * x + (1 - lam) * x[index, :]
+    y_a, y_b = y, y[index]
+    return mixed_x, y_a, y_b, lam
 
+def mixup_criterion(criterion, pred, y_a, y_b, lam):
+    """
+    Compute the MixUp loss given predictions and two sets of targets.
+    """
+    return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
+
+def train_model(model, criterion, optimizer, scheduler, num_epochs=25, use_mixup=True):
+    since = time.time()
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
 
@@ -43,7 +63,6 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
 
             # Iterate over data.
             for inputs, labels, _ in dataloaders[phase]:
-                #print(f"input and label sizes:{len(inputs), len(labels)}")
                 labels = labels.reshape(-1, 1)
                 labels = labels.type(torch.FloatTensor)
                 inputs = inputs.to(device)
@@ -52,18 +71,21 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
                 # zero the parameter gradients
                 optimizer.zero_grad()
 
-                # forward
-                # track history if only in train
-                with torch.set_grad_enabled(phase == 'train'):
+                # For training, optionally apply MixUp augmentation
+                if phase == 'train' and use_mixup:
+                    inputs, y_a, y_b, lam = mixup_data(inputs, labels, alpha=0.4)
                     outputs = model(inputs)
-                    #print(f"output size is {len(outputs)}")
+                    loss = mixup_criterion(criterion, outputs, y_a, y_b, lam)
                     preds = outputs.round()
+                else:
+                    outputs = model(inputs)
                     loss = criterion(outputs, labels)
+                    preds = outputs.round()
 
-                    # backward + optimize only if in training phase
-                    if phase == 'train':
-                        loss.backward()
-                        optimizer.step()
+                # backward + optimize only if in training phase
+                if phase == 'train':
+                    loss.backward()
+                    optimizer.step()
 
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
@@ -76,24 +98,21 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
 
             print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
 
-            # deep copy the model
+            # deep copy the model if validation improves
             if phase == 'val' and epoch_acc > best_acc:
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
-
         print()
 
     time_elapsed = time.time() - since
     print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
     print(f'Best val Acc: {best_acc:4f}')
 
-    # load best model weights
     model.load_state_dict(best_model_wts)
     return model
 
-def train_model_with_sam(model, criterion, optimizer, num_epochs=25, ):
+def train_model_with_sam(model, criterion, optimizer, num_epochs=25, use_mixup=True):
     since = time.time()
-
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
 
@@ -111,34 +130,34 @@ def train_model_with_sam(model, criterion, optimizer, num_epochs=25, ):
             running_loss = 0.0
             running_corrects = 0
 
-            # Iterate over data.
             for inputs, labels, _ in dataloaders[phase]:
-                #print(f"input and label sizes:{len(inputs), len(labels)}")
                 labels = labels.reshape(-1, 1)
                 labels = labels.type(torch.FloatTensor)
                 inputs = inputs.to(device)
                 labels = labels.to(device)
 
-                # zero the parameter gradients
                 optimizer.zero_grad()
 
-                # forward
-                # track history if only in train
+                # Apply MixUp only in training phase if enabled
                 with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(inputs)
+                    if phase == 'train' and use_mixup:
+                        inputs, y_a, y_b, lam = mixup_data(inputs, labels, alpha=0.4)
+                        outputs = model(inputs)
+                        loss = mixup_criterion(criterion, outputs, y_a, y_b, lam)
+                        preds = outputs.round()
+                    else:
+                        outputs = model(inputs)
+                        loss = criterion(outputs, labels)
+                        preds = outputs.round()
 
-                    preds = outputs.round()
-
-                    loss = criterion(outputs, labels)  # use this loss for any training statistics
                     if phase == 'train':
                         loss.backward()
                         optimizer.first_step(zero_grad=True)
 
-                        # second forward-backward pass
-                        criterion(model(inputs), labels).backward()  # make sure to do a full forward pass
+                        # Second pass for SAM
+                        criterion(model(inputs), labels).backward()
                         optimizer.second_step(zero_grad=True)
 
-                # statistics
                 running_loss += loss.item() * inputs.size(0)
                 running_corrects += torch.sum(preds == labels.data)
 
@@ -147,18 +166,15 @@ def train_model_with_sam(model, criterion, optimizer, num_epochs=25, ):
 
             print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
 
-            # deep copy the model
             if phase == 'val' and epoch_acc > best_acc:
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
-
         print()
 
     time_elapsed = time.time() - since
     print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
     print(f'Best val Acc: {best_acc:4f}')
 
-    # load best model weights
     model.load_state_dict(best_model_wts)
     return model
 
@@ -203,9 +219,8 @@ def run_full_validation(model, dataloader):
     return correct/total
 
 
-def train_model_with_sam_and_full_val(model, criterion, optimizer, num_epochs=25):
+def train_model_with_sam_and_full_val(model, criterion, optimizer, num_epochs=25, use_mixup=True):
     since = time.time()
-
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
 
@@ -219,9 +234,10 @@ def train_model_with_sam_and_full_val(model, criterion, optimizer, num_epochs=25
                 model.train()  # Set model to training mode
             else:
                 model.eval()   # Set model to evaluate mode
+                # For full validation, run a custom validation routine
                 val_acc = run_full_validation(model, dataloaders['val'])
                 print(f'{phase} Acc: {val_acc:.4f}')
-                if best_acc < val_acc:
+                if val_acc > best_acc:
                     best_acc = val_acc
                     best_model_wts = copy.deepcopy(model.state_dict())
                 continue
@@ -231,32 +247,33 @@ def train_model_with_sam_and_full_val(model, criterion, optimizer, num_epochs=25
 
             # Iterate over data.
             for inputs, labels, _ in dataloaders[phase]:
-                #print(f"input and label sizes:{len(inputs), len(labels)}")
                 labels = labels.reshape(-1, 1)
                 labels = labels.type(torch.FloatTensor)
                 inputs = inputs.to(device)
                 labels = labels.to(device)
 
-                # zero the parameter gradients
                 optimizer.zero_grad()
 
-                # forward
-                # track history if only in train
-                with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(inputs)
+                # Apply MixUp only in training phase if enabled
+                with torch.set_grad_enabled(True):
+                    if phase == 'train' and use_mixup:
+                        inputs, y_a, y_b, lam = mixup_data(inputs, labels, alpha=0.4)
+                        outputs = model(inputs)
+                        loss = mixup_criterion(criterion, outputs, y_a, y_b, lam)
+                        preds = outputs.round()
+                    else:
+                        outputs = model(inputs)
+                        loss = criterion(outputs, labels)
+                        preds = outputs.round()
 
-                    preds = outputs.round()
-
-                    loss = criterion(outputs, labels)  # use this loss for any training statistics
                     if phase == 'train':
                         loss.backward()
                         optimizer.first_step(zero_grad=True)
 
-                        # second forward-backward pass
-                        criterion(model(inputs), labels).backward()  # make sure to do a full forward pass
+                        # Second pass for SAM: re-calculate loss for perturbed inputs
+                        criterion(model(inputs), labels).backward()
                         optimizer.second_step(zero_grad=True)
 
-                # statistics
                 running_loss += loss.item() * inputs.size(0)
                 running_corrects += torch.sum(preds == labels.data)
 
@@ -265,14 +282,12 @@ def train_model_with_sam_and_full_val(model, criterion, optimizer, num_epochs=25
 
             print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
 
-
         print()
 
     time_elapsed = time.time() - since
     print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
-    print(f'Best val Acc: {best_acc:4f}')
+    print(f'Best val Acc: {best_acc:.4f}')
 
-    # load best model weights
     model.load_state_dict(best_model_wts)
     return model
 

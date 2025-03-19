@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 for s in ['train', 'val']:
     with open('{}_words_gt.txt'.format(s), 'r', encoding='utf8') as f:

@@ -6,6 +6,7 @@ import pandas as pd
 import json
 from PIL import Image
 from torchvision import transforms
+from torchvision.transforms import RandAugment
 
 data_transforms = {
     'train': {
@@ -14,6 +15,8 @@ data_transforms = {
             transforms.RandomGrayscale(),
             transforms.ColorJitter(brightness=.5, hue=.3),
             transforms.Resize((256, 256)),
+            # Insert RandAugment after resizing, before converting to tensor
+            RandAugment(num_ops=2, magnitude=9),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) # Image Net
             #transforms.Normalize(mean=[0.548, 0.529, 0.539], std=[0.268, 0.280, 0.274]) # Hockey
@@ -23,6 +26,8 @@ data_transforms = {
                 transforms.RandomGrayscale(),
                 transforms.ColorJitter(brightness=.5, hue=.3),
                 transforms.Resize((224, 224)),
+                # Insert RandAugment for additional random augmentations
+                RandAugment(num_ops=2, magnitude=9),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Image Net
                 # transforms.Normalize(mean=[0.548, 0.529, 0.539], std=[0.268, 0.280, 0.274]) # Hockey

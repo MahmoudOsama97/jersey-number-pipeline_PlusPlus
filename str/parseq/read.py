@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # Scene Text Recognition Model Hub
 # Copyright 2022 Darwin Bautista
 #
