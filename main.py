@@ -7,6 +7,7 @@ import helpers
 from tqdm import tqdm
 import configuration as config
 from pathlib import Path
+import time
 
 def get_soccer_net_raw_legibility_results(args, use_filtered = True, filter = 'gauss', exclude_balls=True):
     root_dir = config.dataset['SoccerNet']['root_dir']
@@ -364,6 +365,7 @@ def soccer_net_pipeline(args):
 
 
 if __name__ == '__main__':
+    pipeline_beginning = time.time()
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset', help="Options: 'SoccerNet', 'Hockey'")
     parser.add_argument('part', help="Options: 'test', 'val', 'train', 'challenge")
@@ -393,5 +395,8 @@ if __name__ == '__main__':
             print("Unknown dataset")
     else:
         train_parseq(args)
+    pipeline_ending = time.time()
+    print("")
+    print(f"Pipeline took {pipeline_ending - pipeline_beginning} seconds to run.")
 
 
