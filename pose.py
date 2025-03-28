@@ -3,13 +3,14 @@ import os
 import warnings
 import json
 import sys
+import torch
 
 ROOT = './pose/ViTPose/'
 sys.path.append(str(ROOT))  # add ROOT to PATH
 
 from argparse import ArgumentParser
 
-from xtcocotools.coco import COCO
+from pycocotools.coco import COCO
 
 from mmpose.apis import (inference_top_down_pose_model, init_pose_model,
                          vis_pose_result)
@@ -46,8 +47,8 @@ def main():
         default='',
         help='Root of the output img file. '
              'Default not saving the visualization images.')
-    parser.add_argument(
-        '--device', default='cuda:0', help='Device used for inference')
+    default_device = "cuda" if torch.cuda.is_available() else "cpu"
+    parser.add_argument('--device', default=default_device, help='Device used for inference')
     parser.add_argument(
         '--kpt-thr', type=float, default=0.3, help='Keypoint score threshold')
     parser.add_argument(
@@ -90,6 +91,10 @@ def main():
     output_layer_names = None
 
     results = []
+    
+    alpha = 0.5  # temporal smoothing constant
+    prev_keypoints = None
+
 
     # process each image
     for i in range(len(img_keys)):
@@ -109,20 +114,49 @@ def main():
             person_results.append(person)
 
         # test a single image, with a list of bboxes
-        pose_results, returned_outputs = inference_top_down_pose_model(
-            pose_model,
-            image_name,
-            person_results,
-            bbox_thr=None,
-            format='xywh',
-            dataset=dataset,
-            dataset_info=dataset_info,
-            return_heatmap=return_heatmap,
-            outputs=output_layer_names)
+        if args.device.lower().startswith('cuda') and torch.cuda.is_available():
+            with torch.autocast("cuda", dtype=torch.float16):
+                pose_results, returned_outputs = inference_top_down_pose_model(
+                    pose_model,
+                    image_name,
+                    person_results,
+                    bbox_thr=None,
+                    format='xywh',
+                    dataset=dataset,
+                    dataset_info=dataset_info,
+                    return_heatmap=return_heatmap,
+                    outputs=output_layer_names)
+        else:
+            pose_results, returned_outputs = inference_top_down_pose_model(
+                pose_model,
+                image_name,
+                person_results,
+                bbox_thr=None,
+                format='xywh',
+                dataset=dataset,
+                dataset_info=dataset_info,
+                return_heatmap=return_heatmap,
+                outputs=output_layer_names)
 
-        # print(pose_results)
+        # Getting keypoints and applying temporal smoothing with exp moving avg
+        current_kpts = pose_results[0]['keypoints']
+        if prev_keypoints is None:
+            smoothed_kpts = current_kpts
+        else:
+            smoothed_kpts = [alpha * curr + (1 - alpha) * prev for curr, prev in zip(current_kpts, prev_keypoints)]
+        prev_keypoints = smoothed_kpts
+
+        # Replacing the keypoints in the pose_results with the smoothed values
+        pose_results[0]['keypoints'] = smoothed_kpts
+        serializable_keypoints = []
+        for k in smoothed_kpts:
+            if hasattr(k, "tolist"):
+                serializable_keypoints.append(k.tolist())
+            else:
+                serializable_keypoints.append(k)
+
         results.append(
-            {"img_name": image['file_name'], "id": image_id, "keypoints": pose_results[0]['keypoints'].tolist()})
+            {"img_name": image['file_name'], "id": image_id, "keypoints": serializable_keypoints})
 
         if args.out_img_root == '':
             out_file = None
