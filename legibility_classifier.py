@@ -20,7 +20,7 @@ import pandas as pd
 import numpy as np
 
 
-from sam2.sam import SAM
+from sam2 import sam
 
 
 def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
