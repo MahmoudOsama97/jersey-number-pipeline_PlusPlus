@@ -22,7 +22,9 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 from nltk import edit_distance
-from pytorch_lightning.utilities.types import EPOCH_OUTPUT, STEP_OUTPUT
+from typing import List, Dict, Optional, Tuple
+EPOCH_OUTPUT = List[dict]
+STEP_OUTPUT = Dict
 from timm.optim import create_optimizer_v2
 from torch import Tensor
 from torch.optim import Optimizer
@@ -129,7 +131,7 @@ class BaseSystem(pl.LightningModule, ABC):
         return dict(output=BatchResult(total, correct, ned, confidence, label_length, loss, loss_numel))
 
     @staticmethod
-    def _aggregate_results(outputs: EPOCH_OUTPUT) -> Tuple[float, float, float]:
+    def _aggregate_results(outputs: List[dict]) -> Tuple[float, float, float]:
         if not outputs:
             return 0., 0., 0.
         total_loss = 0
@@ -149,17 +151,17 @@ class BaseSystem(pl.LightningModule, ABC):
         loss = total_loss / total_loss_numel
         return acc, ned, loss
 
-    def validation_step(self, batch, batch_idx) -> Optional[STEP_OUTPUT]:
+    def validation_step(self, batch, batch_idx) -> Optional[dict]:
         return self._eval_step(batch, True)
 
-    def validation_epoch_end(self, outputs: EPOCH_OUTPUT) -> None:
+    def validation_epoch_end(self, outputs: List[dict]) -> None:
         acc, ned, loss = self._aggregate_results(outputs)
         self.log('val_accuracy', 100 * acc, sync_dist=True)
         self.log('val_NED', 100 * ned, sync_dist=True)
         self.log('val_loss', loss, sync_dist=True)
         self.log('hp_metric', acc, sync_dist=True)
 
-    def test_step(self, batch, batch_idx) -> Optional[STEP_OUTPUT]:
+    def test_step(self, batch, batch_idx) -> Optional[dict]:
         return self._eval_step(batch, False)
 
 

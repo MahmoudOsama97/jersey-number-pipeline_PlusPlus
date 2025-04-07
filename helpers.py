@@ -29,7 +29,7 @@ json_annotation_template = {"id": 0,
 
 # Constants for pose-based torso cropping
 PADDING = 5
-CONFIDENCE_THRESHOLD = 0.4
+CONFIDENCE_THRESHOLD = 0.05
 TS = 2.367
 HEIGHT_MIN = 35
 WIDTH_MIN = 30

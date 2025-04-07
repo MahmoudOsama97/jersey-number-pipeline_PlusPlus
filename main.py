@@ -7,6 +7,8 @@ import helpers
 from tqdm import tqdm
 import configuration as config
 from pathlib import Path
+import time
+import PredictionConsolidation
 
 def get_soccer_net_raw_legibility_results(args, use_filtered = True, filter = 'gauss', exclude_balls=True):
     root_dir = config.dataset['SoccerNet']['root_dir']
@@ -340,7 +342,11 @@ def soccer_net_pipeline(args):
         #8. combine tracklet results
         analysis_results = None
         #read predicted results, stack unique predictions, sum confidence scores for each, choose argmax
-        results_dict, analysis_results = helpers.process_jersey_id_predictions(str_result_file, useBias=True)
+        
+        results_dict, analysis_results = PredictionConsolidation.process_jersey_id_predictions(str_result_file)
+
+        print("results_dict", results_dict)
+        print("analysis_results", analysis_results)
         #results_dict, analysis_results = helpers.process_jersey_id_predictions_raw(str_result_file, useTS=True)
         #results_dict, analysis_results = helpers.process_jersey_id_predictions_bayesian(str_result_file, useTS=True, useBias=True, useTh=True)
 
@@ -364,6 +370,7 @@ def soccer_net_pipeline(args):
 
 
 if __name__ == '__main__':
+    pipeline_beginning = time.time()
     parser = argparse.ArgumentParser()
     parser.add_argument('dataset', help="Options: 'SoccerNet', 'Hockey'")
     parser.add_argument('part', help="Options: 'test', 'val', 'train', 'challenge")
@@ -393,5 +400,8 @@ if __name__ == '__main__':
             print("Unknown dataset")
     else:
         train_parseq(args)
+    pipeline_ending = time.time()
+    print("")
+    print(f"Pipeline took {pipeline_ending - pipeline_beginning} seconds to run.")
 
 
