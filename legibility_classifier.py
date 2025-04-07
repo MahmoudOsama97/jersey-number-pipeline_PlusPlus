@@ -19,7 +19,9 @@ from tqdm import tqdm
 import pandas as pd
 import numpy as np
 
-from sam2.sam import SAM
+
+from sam2 import sam
+
 
 def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
     since = time.time()
@@ -470,7 +472,7 @@ if __name__ == '__main__':
         if args.sam:
             # Observe that all parameters are being optimized
             base_optimizer = torch.optim.SGD
-            optimizer_ft = SAM(model_ft.parameters(), base_optimizer, lr=0.001, momentum=0.9)
+            optimizer_ft = sam(model_ft.parameters(), base_optimizer, lr=0.001, momentum=0.9)
 
             if use_full_validation:
                 model_ft = train_model_with_sam_and_full_val(model_ft, criterion, optimizer_ft, num_epochs=10)
