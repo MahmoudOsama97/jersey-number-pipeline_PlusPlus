@@ -152,78 +152,24 @@ class PARSeq(CrossEntropySystem):
         return logits
 
     def gen_tgt_perms(self, tgt):
-        """Generate shared permutations for the whole batch.
-           This works because the same attention mask can be used for the shorter sequences
-           because of the padding mask.
-        """
-        # We don't permute the position of BOS, we permute EOS separately
-        max_num_chars = tgt.shape[1] - 2
-        # Special handling for 1-character sequences
-        if max_num_chars == 1:
-            return torch.arange(3, device=self._device).unsqueeze(0)
-        perms = [torch.arange(max_num_chars, device=self._device)] if self.perm_forward else []
-        # Additional permutations if needed
-        max_perms = math.factorial(max_num_chars)
-        if self.perm_mirrored:
-            max_perms //= 2
-        num_gen_perms = min(self.max_gen_perms, max_perms)
-        # For 4-char sequences and shorter, we generate all permutations and sample from the pool to avoid collisions
-        # Note that this code path might NEVER get executed since the labels in a mini-batch typically exceed 4 chars.
-        if max_num_chars < 5:
-            # Pool of permutations to sample from. We only need the first half (if complementary option is selected)
-            # Special handling for max_num_chars == 4 which correctly divides the pool into the flipped halves
-            if max_num_chars == 4 and self.perm_mirrored:
-                selector = [0, 3, 4, 6, 9, 10, 12, 16, 17, 18, 19, 21]
-            else:
-                selector = list(range(max_perms))
-            perm_pool = torch.as_tensor(list(permutations(range(max_num_chars), max_num_chars)), device=self._device)[selector]
-            # If the forward permutation is always selected, no need to add it to the pool for sampling
-            if self.perm_forward:
-                perm_pool = perm_pool[1:]
-            perms = torch.stack(perms)
-            if len(perm_pool):
-                i = self.rng.choice(len(perm_pool), size=num_gen_perms - len(perms), replace=False)
-                perms = torch.cat([perms, perm_pool[i]])
-        else:
-            perms.extend([torch.randperm(max_num_chars, device=self._device) for _ in range(num_gen_perms - len(perms))])
-            perms = torch.stack(perms)
-        if self.perm_mirrored:
-            # Add complementary pairs
-            comp = perms.flip(-1)
-            # Stack in such a way that the pairs are next to each other.
-            perms = torch.stack([perms, comp]).transpose(0, 1).reshape(-1, max_num_chars)
-        # NOTE:
-        # The only meaningful way of permuting the EOS position is by moving it one character position at a time.
-        # However, since the number of permutations = T! and number of EOS positions = T + 1, the number of possible EOS
-        # positions will always be much less than the number of permutations (unless a low perm_num is set).
-        # Thus, it would be simpler to just train EOS using the full and null contexts rather than trying to evenly
-        # distribute it across the chosen number of permutations.
-        # Add position indices of BOS and EOS
-        bos_idx = perms.new_zeros((len(perms), 1))
-        eos_idx = perms.new_full((len(perms), 1), max_num_chars + 1)
-        perms = torch.cat([bos_idx, perms + 1, eos_idx], dim=1)
-        # Special handling for the reverse direction. This does two things:
-        # 1. Reverse context for the characters
-        # 2. Null context for [EOS] (required for learning to predict [EOS] in NAR mode)
-        if len(perms) > 1:
-            perms[1, 1:] = max_num_chars + 1 - torch.arange(max_num_chars + 1, device=self._device)
-        return perms
+       
+       """Generate only the canonical left-to-right permutation."""
+       max_num_chars = tgt.shape[1] - 2  # Exclude BOS and EOS
+       # Generate the canonical forward order
+       perms = [torch.arange(max_num_chars, device=self._device)]
+       # Add BOS and EOS tokens
+       bos_idx = perms[0].new_zeros((1, 1))
+       eos_idx = perms[0].new_full((1, 1), max_num_chars + 1)
+       perms = torch.cat([bos_idx, perms[0].unsqueeze(0) + 1, eos_idx], dim=1)
+       
+       return perms
 
     def generate_attn_masks(self, perm):
-        """Generate attention masks given a sequence permutation (includes pos. for bos and eos tokens)
-        :param perm: the permutation sequence. i = 0 is always the BOS
-        :return: lookahead attention masks
-        """
+        """Generate a simple forward attention mask."""
         sz = perm.shape[0]
-        mask = torch.zeros((sz, sz), device=self._device)
-        for i in range(sz):
-            query_idx = perm[i]
-            masked_keys = perm[i + 1:]
-            mask[query_idx, masked_keys] = float('-inf')
-        content_mask = mask[:-1, :-1].clone()
-        mask[torch.eye(sz, dtype=torch.bool, device=self._device)] = float('-inf')  # mask "self"
-        query_mask = mask[1:, :-1]
-        return content_mask, query_mask
+        mask = torch.triu(torch.full((sz, sz), float('-inf'), device=self._device), 1)
+        
+        return mask[:-1, :-1], mask[1:, :-1]
 
     def training_step(self, batch, batch_idx) -> STEP_OUTPUT:
         images, labels = batch
